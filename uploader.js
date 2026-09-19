@@ -13,15 +13,19 @@ const ROUTING_RULES = [
 ];
 const DEFAULT_ROUTE = { destination: "@debzyotidas", platform: "telegram" };
 
+// --- Telegram Alert Helper ---
 async function sendAlert(message) {
     const baseUrl = `https://api.telegram.org/bot${ALERT_BOT_TOKEN}/sendMessage`;
     try {
         const req = https.request(baseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
         req.write(JSON.stringify({ chat_id: ADMIN_CHAT_ID, text: message, parse_mode: "Markdown" }));
         req.end();
-    } catch (err) { console.error("Alert Error:", err.message); }
+    } catch (err) { 
+        console.error("Alert Error:", err.message); 
+    }
 }
 
+// --- Dynamic Route Resolver ---
 function resolveRoute(folderName) {
     const lower = folderName.toLowerCase();
     for (const rule of ROUTING_RULES) {
@@ -30,32 +34,73 @@ function resolveRoute(folderName) {
     return DEFAULT_ROUTE;
 }
 
+// --- Clean Caption Formatter ---
+function formatCaption(folderName) {
+    const match = folderName.match(/^(\d{4})-(\d{2})-(\d{2})\s+\d{2}\.\d{2}\.\d{2}\s+(.*)$/);
+    let dateStr = "";
+    let rawTitle = folderName;
+
+    if (match) {
+        const [, year, month, day, title] = match;
+        const dateObj = new Date(`${year}-${month}-${day}`);
+        dateStr = dateObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+        rawTitle = title;
+    }
+
+    let cleanedTitle = rawTitle
+        .replace(/tcr/gi, '')
+        .replace(/laxmi\s+nagar/gi, '')
+        .replace(/\s+-\s+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    return dateStr ? `📚 Class Recording: ${dateStr}${cleanedTitle}` : `📚 Class Recording: ${cleanedTitle}`;
+}
+
+// --- Downloader Engine ---
 async function downloadVideo(url, destPath) {
     console.log(`[INFO] Downloading video from Zoom Cloud...`);
-    sendAlert(`☁️ **Cloud Download Started**\n\n📥 **Fetching:** \`${FOLDER_NAME}\``);
+    sendAlert(`📥 **Downloading Zoom Cloud File...**\n\n📌 **Topic:** \`${FOLDER_NAME}\``);
+    
     const writer = fs.createWriteStream(destPath);
     const response = await axios({ url, method: 'GET', responseType: 'stream' });
     response.data.pipe(writer);
+    
     return new Promise((resolve, reject) => {
-        writer.on('finish', resolve);
-        writer.on('error', reject);
+        writer.on('finish', () => {
+            const stats = fs.statSync(destPath);
+            const sizeMB = (stats.size / (1024 * 1024)).toFixed(2);
+            sendAlert(`✅ **Download Complete** (${sizeMB} MB)\n\nConnecting MTProto client to Telegram...`);
+            resolve();
+        });
+        writer.on('error', (err) => {
+            sendAlert(`🚨 **Cloud Download Failed!**\n\nError: \`${err.message}\``);
+            reject(err);
+        });
     });
 }
 
+// --- Main Cloud Execution Pipeline ---
 async function runCloudPipeline() {
     const route = resolveRoute(FOLDER_NAME);
     const videoPath = "class_recording.mp4";
-    const caption = `📚 Class Recording: ${FOLDER_NAME}`;
+    const caption = formatCaption(FOLDER_NAME);
 
     if (route.platform === "youtube") {
-        sendAlert(`🟡 **YouTube Route Detected**\n\nSkipping Telegram pipeline for: \`${FOLDER_NAME}\``);
-        return;
+        sendAlert(`🟡 **YouTube Route Detected**\n\nSkipping Telegram upload for: \`${FOLDER_NAME}\``);
+        process.exit(0);
     }
 
+    let client;
     try {
         await downloadVideo(DOWNLOAD_URL, videoPath);
         
-        const client = new TelegramClient(new StringSession(STRING_SESSION), parseInt(API_ID), API_HASH, { connectionRetries: 5 });
+        client = new TelegramClient(new StringSession(STRING_SESSION), parseInt(API_ID), API_HASH, { 
+            connectionRetries: 5,
+            requestRetries: 5,
+            useWSS: true
+        });
+        
         await client.connect();
 
         let uploadAttempts = 0;
@@ -64,26 +109,52 @@ async function runCloudPipeline() {
         while (uploadAttempts < 3 && !uploadSuccess) {
             uploadAttempts++;
             try {
-                if (uploadAttempts === 1) sendAlert(`📤 **Telegram Upload Starting...**\n\n🎯 **Target:** \`${route.destination}\``);
-                else sendAlert(`🔄 **Retrying Upload (Attempt ${uploadAttempts}/3)...**`);
+                if (uploadAttempts === 1) {
+                    sendAlert(`📤 **Telegram Upload Starting...**\n\n🎯 **Target:** \`${route.destination}\`\n📝 **Caption:** ${caption}`);
+                } else {
+                    sendAlert(`🔄 **Retrying Upload (Attempt ${uploadAttempts}/3)...**\n\n📌 **Topic:** \`${FOLDER_NAME}\``);
+                }
+
+                let lastLogged = 0;
 
                 await client.sendFile(route.destination, {
                     file: videoPath,
                     caption: caption,
-                    workers: 1, 
+                    workers: 1, // Single worker prevents 90% connection drops
                     supportsStreaming: true,
-                    attributes: [new Api.DocumentAttributeVideo({ w: 1280, h: 720, duration: 0, supportsStreaming: true })]
+                    attributes: [new Api.DocumentAttributeVideo({ w: 1280, h: 720, duration: 0, supportsStreaming: true })],
+                    progressCallback: (progress) => {
+                        const percent = Math.floor(progress * 100);
+                        if (percent >= lastLogged + 25) {
+                            console.log(`[INFO] Cloud Upload Progress: ${percent}%`);
+                            lastLogged = percent;
+                        }
+                    }
                 });
                 
                 sendAlert(`✅ **Cloud Upload Successful!**\n\n📁 **Folder:** \`${FOLDER_NAME}\`\n🎯 **Sent To:** \`${route.destination}\``);
                 uploadSuccess = true;
+                
+                // Disconnect client & exit cleanly to kill the runner
+                await client.disconnect();
+                process.exit(0);
+
             } catch (err) {
-                if (uploadAttempts >= 3) sendAlert(`❌ **Upload Failed After 3 Attempts!**\n\n🚨 **Error:** \`${err.message}\``);
-                else await new Promise(r => setTimeout(r, 10000));
+                console.error(`[ERROR] Upload attempt ${uploadAttempts} failed:${err.message}`);
+                if (uploadAttempts >= 3) {
+                    sendAlert(`❌ **Upload Failed After 3 Attempts!**\n\n📁 **Topic:** \`${FOLDER_NAME}\`\n🚨 **Error:** \`${err.message}\``);
+                    if (client) await client.disconnect();
+                    process.exit(1);
+                } else {
+                    sendAlert(`⚠️ **Upload Attempt ${uploadAttempts} Interrupted**\n\nWaiting 10 seconds before retrying...`);
+                    await new Promise(r => setTimeout(r, 10000));
+                }
             }
         }
     } catch (err) {
-        sendAlert(`❌ **Pipeline Fatal Error!**\n\n🚨 \`${err.message}\``);
+        sendAlert(`❌ **Pipeline Fatal Error!**\n\n🚨 **Error:** \`${err.message}\``);
+        if (client) await client.disconnect();
+        process.exit(1);
     }
 }
 
