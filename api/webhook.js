@@ -1,12 +1,26 @@
 const crypto = require("crypto");
 
+async function sendTelegramAlert(botToken, chatId, text) {
+  if (!botToken || !chatId) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: text, parse_mode: "Markdown" })
+    });
+  } catch (err) {
+    console.error("Failed to send alert from Vercel:", err.message);
+  }
+}
+
 module.exports = async function handler(req, res) {
-  // Reject non-POST requests
   if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
 
   const ZOOM_WEBHOOK_SECRET = process.env.ZOOM_WEBHOOK_SECRET;
   const GITHUB_PAT = process.env.GITHUB_PAT;
-  const GITHUB_REPO = "iTzDeb/zoom-to-telegram"; 
+  const GITHUB_REPO = "iTzDeb/zoom-to-telegram";
+  const ALERT_BOT_TOKEN = process.env.ALERT_BOT_TOKEN || "8887021473:AAEg_d_HVApFL8GtJdb_pSOVngDMxzihZE0";
+  const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || "499900380";
 
   const body = req.body;
 
@@ -22,12 +36,27 @@ module.exports = async function handler(req, res) {
     });
   }
 
-  // 2. Relay Recording Data to GitHub Actions
+  const topic = body?.payload?.object?.topic || "Zoom Class";
+
+  // 2. Real-Time Status Alerts (Directly from Vercel, 0 Action Minutes)
+  if (body && body.event === "recording.started") {
+    await sendTelegramAlert(ALERT_BOT_TOKEN, ADMIN_CHAT_ID, `🔴 **Zoom Cloud Recording Started**\n\n📌 **Topic:** \`${topic}\``);
+    return res.status(200).send("OK");
+  }
+
+  if (body && body.event === "recording.stopped") {
+    await sendTelegramAlert(ALERT_BOT_TOKEN, ADMIN_CHAT_ID, `⏹️ **Zoom Cloud Recording Stopped**\n\n📌 **Topic:** \`${topic}\`\n⏳ Rendering on Zoom cloud servers...`);
+    return res.status(200).send("OK");
+  }
+
+  // 3. Relay Recording Data to GitHub Actions on Completion
   if (body && body.event === "recording.completed") {
     const mp4File = body.payload.object.recording_files?.find(f => f.file_extension === "MP4");
     if (mp4File) {
       const downloadUrl = mp4File.download_url + "?access_token=" + body.download_token;
       
+      await sendTelegramAlert(ALERT_BOT_TOKEN, ADMIN_CHAT_ID, `⚙️ **Zoom Cloud Processing Complete**\n\n📌 **Topic:** \`${topic}\`\n🚀 Dispatching GitHub Action Cloud Uploader...`);
+
       await fetch(`https://api.github.com/repos/${GITHUB_REPO}/dispatches`, {
         method: "POST",
         headers: { 
@@ -37,7 +66,7 @@ module.exports = async function handler(req, res) {
         },
         body: JSON.stringify({
           event_type: "zoom_recording_ready",
-          client_payload: { download_url: downloadUrl, folder_name: body.payload.object.topic }
+          client_payload: { download_url: downloadUrl, folder_name: topic }
         })
       });
     }
