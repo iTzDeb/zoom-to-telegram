@@ -2,6 +2,14 @@ name: Zoom to Telegram Pipeline
 on:
   repository_dispatch:
     types: [zoom_recording_ready]
+  workflow_dispatch:
+    inputs:
+      folder_name:
+        description: 'Meeting Title (e.g., 2026-09-20 11.00.00 TCR CLAT)'
+        required: true
+      download_url:
+        description: 'Direct MP4 Download URL'
+        required: true
 
 jobs:
   process-video:
@@ -23,8 +31,9 @@ jobs:
 
       - name: Execute Cloud Uploader
         env:
-          DOWNLOAD_URL: ${{ github.event.client_payload.download_url }}
-          FOLDER_NAME: ${{ github.event.client_payload.folder_name }}
+          # This fallback logic allows BOTH automated webhooks and manual inputs to work
+          DOWNLOAD_URL: ${{ github.event.client_payload.download_url || github.event.inputs.download_url }}
+          FOLDER_NAME: ${{ github.event.client_payload.folder_name || github.event.inputs.folder_name }}
           API_ID: ${{ secrets.API_ID }}
           API_HASH: ${{ secrets.API_HASH }}
           STRING_SESSION: ${{ secrets.STRING_SESSION }}
