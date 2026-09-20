@@ -3,6 +3,7 @@ const { StringSession } = require("telegram/sessions");
 const axios = require("axios");
 const fs = require("fs");
 const https = require("https"); 
+const { execSync } = require("child_process");
 
 const { API_ID, API_HASH, STRING_SESSION, ALERT_BOT_TOKEN, ADMIN_CHAT_ID, DOWNLOAD_URL, FOLDER_NAME } = process.env;
 
@@ -12,6 +13,7 @@ const ROUTING_RULES = [
     { match: "aibe", destination: "-1004024072220", platform: "telegram" },
 ];
 const DEFAULT_ROUTE = { destination: "@debzyotidas", platform: "telegram" };
+const EXCLUDED_MEETINGS = ["shivam singh's zoom meeting", "personal meeting room"];
 
 // --- Telegram Alert Helper ---
 async function sendAlert(message) {
@@ -70,7 +72,7 @@ async function downloadVideo(url, destPath) {
         writer.on('finish', () => {
             const stats = fs.statSync(destPath);
             const sizeMB = (stats.size / (1024 * 1024)).toFixed(2);
-            sendAlert(`✅ **Download Complete** (${sizeMB} MB)\n\nConnecting MTProto client to Telegram...`);
+            sendAlert(`✅ **Download Complete** (${sizeMB} MB)\n\nOptimizing metadata for Telegram playback...`);
             resolve();
         });
         writer.on('error', (err) => {
@@ -82,19 +84,36 @@ async function downloadVideo(url, destPath) {
 
 // --- Main Cloud Execution Pipeline ---
 async function runCloudPipeline() {
-    const route = resolveRoute(FOLDER_NAME);
-    const videoPath = "class_recording.mp4";
-    const caption = formatCaption(FOLDER_NAME);
-
-    if (route.platform === "youtube") {
-        sendAlert(`🟡 **YouTube Route Detected**\n\nSkipping Telegram upload for: \`${FOLDER_NAME}\``);
+    const lowerFolder = FOLDER_NAME.toLowerCase();
+    
+    // 1. Check for Exclusions
+    if (EXCLUDED_MEETINGS.some(excluded => lowerFolder.includes(excluded))) {
+        sendAlert(`⏭️ **Skipped Meeting (Exclusion Match):**\n\`${FOLDER_NAME}\``);
+        console.log(`[INFO] Skipped excluded meeting: ${FOLDER_NAME}`);
         process.exit(0);
     }
 
+    const route = resolveRoute(FOLDER_NAME);
+    const videoPath = "class_recording.mp4";
+    const fixedVideoPath = "fixed_class_recording.mp4";
+    const caption = formatCaption(FOLDER_NAME);
+
     let client;
     try {
+        // 2. Download Original File
         await downloadVideo(DOWNLOAD_URL, videoPath);
         
+        // 3. Apply FFmpeg faststart fix
+        try {
+            console.log("[INFO] Running FFmpeg to fix moov atom...");
+            execSync(`ffmpeg -i ${videoPath} -c copy -movflags +faststart${fixedVideoPath}`);
+            console.log("[INFO] FFmpeg optimization complete.");
+        } catch (err) {
+            console.error("[ERROR] FFmpeg failed:", err.message);
+            fs.renameSync(videoPath, fixedVideoPath); // Fallback to raw file if FFmpeg fails
+        }
+        
+        // 4. Initialize Telegram
         client = new TelegramClient(new StringSession(STRING_SESSION), parseInt(API_ID), API_HASH, { 
             connectionRetries: 5,
             requestRetries: 5,
@@ -106,6 +125,7 @@ async function runCloudPipeline() {
         let uploadAttempts = 0;
         let uploadSuccess = false;
 
+        // 5. Upload with Retries
         while (uploadAttempts < 3 && !uploadSuccess) {
             uploadAttempts++;
             try {
@@ -118,9 +138,9 @@ async function runCloudPipeline() {
                 let lastLogged = 0;
 
                 await client.sendFile(route.destination, {
-                    file: videoPath,
+                    file: fixedVideoPath, // Uploading the FFmpeg-fixed file
                     caption: caption,
-                    workers: 1, // Single worker prevents 90% connection drops
+                    workers: 1, 
                     supportsStreaming: true,
                     attributes: [new Api.DocumentAttributeVideo({ w: 1280, h: 720, duration: 0, supportsStreaming: true })],
                     progressCallback: (progress) => {
@@ -135,7 +155,7 @@ async function runCloudPipeline() {
                 sendAlert(`✅ **Cloud Upload Successful!**\n\n📁 **Folder:** \`${FOLDER_NAME}\`\n🎯 **Sent To:** \`${route.destination}\``);
                 uploadSuccess = true;
                 
-                // Disconnect client & exit cleanly to kill the runner
+                // 6. Clean Exit
                 await client.disconnect();
                 process.exit(0);
 
