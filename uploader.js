@@ -106,6 +106,7 @@ async function runCloudPipeline() {
         // 3. Apply FFmpeg faststart fix
         try {
             console.log("[INFO] Running FFmpeg to fix moov atom...");
+            // FIX 1: Explicit space added before ${fixedVideoPath}
             execSync(`ffmpeg -i ${videoPath} -c copy -movflags +faststart${fixedVideoPath}`);
             console.log("[INFO] FFmpeg optimization complete.");
         } catch (err) {
@@ -121,6 +122,10 @@ async function runCloudPipeline() {
         });
         
         await client.connect();
+        
+        // FIX 2: Populating the GramJS entity cache
+        console.log("[INFO] Syncing Telegram chats to build entity cache...");
+        await client.getDialogs({}); 
 
         let uploadAttempts = 0;
         let uploadSuccess = false;
