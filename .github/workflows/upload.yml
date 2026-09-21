@@ -14,15 +14,15 @@ on:
 jobs:
   process-video:
     runs-on: ubuntu-latest
-    timeout-minutes: 120 # Added to prevent premature termination of large uploads
+    timeout-minutes: 120 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4 # Updated to v4
 
       - name: Setup Node.js Environment
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4 # Updated to v4
         with:
-          node-version: '18'
+          node-version: '20' # Updated to Node 20 LTS
 
       - name: Install Network Packages
         run: npm install telegram axios
@@ -32,7 +32,6 @@ jobs:
 
       - name: Execute Cloud Uploader
         env:
-          # This fallback logic allows BOTH automated webhooks and manual inputs to work
           DOWNLOAD_URL: ${{ github.event.client_payload.download_url || github.event.inputs.download_url }}
           FOLDER_NAME: ${{ github.event.client_payload.folder_name || github.event.inputs.folder_name }}
           API_ID: ${{ secrets.API_ID }}
