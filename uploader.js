@@ -72,7 +72,7 @@ async function downloadVideo(url, destPath) {
         writer.on('finish', () => {
             const stats = fs.statSync(destPath);
             const sizeMB = (stats.size / (1024 * 1024)).toFixed(2);
-            sendAlert(`✅ **Download Complete** (${sizeMB} MB)\n\nOptimizing metadata for Telegram playback...`);
+            sendAlert(`✅ **Download Complete** (${sizeMB} MB)`);
             resolve();
         });
         writer.on('error', (err) => {
@@ -84,6 +84,7 @@ async function downloadVideo(url, destPath) {
 
 // --- Main Cloud Execution Pipeline ---
 async function runCloudPipeline() {
+    sendAlert(`🚀 **Cloud Pipeline Initiated**\n\n📁 **Topic:** \`${FOLDER_NAME}\``);
     const lowerFolder = FOLDER_NAME.toLowerCase();
     
     // 1. Check for Exclusions
@@ -94,6 +95,8 @@ async function runCloudPipeline() {
     }
 
     const route = resolveRoute(FOLDER_NAME);
+    sendAlert(`🗺️ **Routing Resolved:**\n🎯 **Destination:** \`${route.destination}\``);
+
     const videoPath = "class_recording.mp4";
     const fixedVideoPath = "fixed_class_recording.mp4";
     const caption = formatCaption(FOLDER_NAME);
@@ -105,16 +108,19 @@ async function runCloudPipeline() {
         
         // 3. Apply FFmpeg faststart fix
         try {
+            sendAlert(`⚙️ **Starting FFmpeg Optimization...**\nFixing moov atom for streaming.`);
             console.log("[INFO] Running FFmpeg to fix moov atom...");
-            // FIX 1: Explicit space added before ${fixedVideoPath}
             execSync(`ffmpeg -i ${videoPath} -c copy -movflags +faststart${fixedVideoPath}`);
+            sendAlert(`✅ **FFmpeg Optimization Complete**`);
             console.log("[INFO] FFmpeg optimization complete.");
         } catch (err) {
+            sendAlert(`⚠️ **FFmpeg Optimization Failed**\nFalling back to raw unoptimized video.\n\nError: \`${err.message}\``);
             console.error("[ERROR] FFmpeg failed:", err.message);
-            fs.renameSync(videoPath, fixedVideoPath); // Fallback to raw file if FFmpeg fails
+            fs.renameSync(videoPath, fixedVideoPath); 
         }
         
         // 4. Initialize Telegram
+        sendAlert(`🔌 **Connecting to Telegram Servers...**`);
         client = new TelegramClient(new StringSession(STRING_SESSION), parseInt(API_ID), API_HASH, { 
             connectionRetries: 5,
             requestRetries: 5,
@@ -123,7 +129,6 @@ async function runCloudPipeline() {
         
         await client.connect();
         
-        // FIX 2: Populating the GramJS entity cache
         console.log("[INFO] Syncing Telegram chats to build entity cache...");
         await client.getDialogs({}); 
 
@@ -143,15 +148,17 @@ async function runCloudPipeline() {
                 let lastLogged = 0;
 
                 await client.sendFile(route.destination, {
-                    file: fixedVideoPath, // Uploading the FFmpeg-fixed file
+                    file: fixedVideoPath,
                     caption: caption,
-                    workers: 1, 
+                    workers: 10, // Increased to 10 for faster uploads based on your previous bottleneck
                     supportsStreaming: true,
                     attributes: [new Api.DocumentAttributeVideo({ w: 1280, h: 720, duration: 0, supportsStreaming: true })],
                     progressCallback: (progress) => {
                         const percent = Math.floor(progress * 100);
+                        // Log locally and send a Telegram alert every 25% to prevent rate-limiting
                         if (percent >= lastLogged + 25) {
                             console.log(`[INFO] Cloud Upload Progress: ${percent}%`);
+                            sendAlert(`⏳ **Upload Progress:** ${percent}%`);
                             lastLogged = percent;
                         }
                     }
