@@ -13,6 +13,21 @@ async function sendTelegramAlert(botToken, chatId, text) {
   }
 }
 
+// NEW: Forward payload to Google Apps Script for the 3-minute timer
+async function forwardToGAS(body) {
+  const GAS_URL = process.env.GAS_WEBHOOK_URL; 
+  if (!GAS_URL) return;
+  try {
+    await fetch(GAS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+  } catch (err) {
+    console.error("Failed to forward to GAS:", err.message);
+  }
+}
+
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
 
@@ -38,9 +53,16 @@ module.exports = async function handler(req, res) {
 
   const topic = body?.payload?.object?.topic || "Zoom Class";
 
-  // 2. Real-Time Status Alerts (Directly from Vercel, 0 Action Minutes)
+  // 2. Meeting Started -> Forward to GAS to start the 3-minute stopwatch
+  if (body && body.event === "meeting.started") {
+    await forwardToGAS(body);
+    return res.status(200).send("OK");
+  }
+
+  // 3. Real-Time Status Alerts & Forwarding
   if (body && body.event === "recording.started") {
     await sendTelegramAlert(ALERT_BOT_TOKEN, ADMIN_CHAT_ID, `🔴 **Zoom Cloud Recording Started**\n\n📌 **Topic:** \`${topic}\``);
+    await forwardToGAS(body); // Forward to GAS to stop the timer
     return res.status(200).send("OK");
   }
 
@@ -49,7 +71,7 @@ module.exports = async function handler(req, res) {
     return res.status(200).send("OK");
   }
 
-  // 3. Relay Recording Data to GitHub Actions on Completion
+  // 4. Relay Recording Data to GitHub Actions on Completion
   if (body && body.event === "recording.completed") {
     const mp4File = body.payload.object.recording_files?.find(f => f.file_extension === "MP4");
     if (mp4File) {
