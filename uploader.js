@@ -110,7 +110,7 @@ async function runCloudPipeline() {
         try {
             sendAlert(`⚙️ **Starting FFmpeg Optimization...**\nFixing moov atom for streaming.`);
             console.log("[INFO] Running FFmpeg to fix moov atom...");
-            execSync(`ffmpeg -i ${videoPath} -c copy -movflags +faststart${fixedVideoPath}`);
+            execSync(`ffmpeg -i ${videoPath} -c copy -movflags +faststart ${fixedVideoPath}`);
             sendAlert(`✅ **FFmpeg Optimization Complete**`);
             console.log("[INFO] FFmpeg optimization complete.");
         } catch (err) {
