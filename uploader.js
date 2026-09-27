@@ -2,7 +2,6 @@ const { TelegramClient, Api } = require("telegram");
 const { StringSession } = require("telegram/sessions");
 const axios = require("axios");
 const fs = require("fs");
-const https = require("https"); 
 const { execSync } = require("child_process");
 
 const { API_ID, API_HASH, STRING_SESSION, ALERT_BOT_TOKEN, ADMIN_CHAT_ID, DOWNLOAD_URL, FOLDER_NAME } = process.env;
@@ -15,13 +14,11 @@ const ROUTING_RULES = [
 const DEFAULT_ROUTE = { destination: "@debzyotidas", platform: "telegram" };
 const EXCLUDED_MEETINGS = ["shivam singh's zoom meeting", "personal meeting room"];
 
-// --- Telegram Alert Helper ---
+// --- Telegram Alert Helper (FIXED: Now properly awaits network delivery) ---
 async function sendAlert(message) {
-    const baseUrl = `https://api.telegram.org/bot${ALERT_BOT_TOKEN}/sendMessage`;
+    const url = `https://api.telegram.org/bot${ALERT_BOT_TOKEN}/sendMessage`;
     try {
-        const req = https.request(baseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
-        req.write(JSON.stringify({ chat_id: ADMIN_CHAT_ID, text: message, parse_mode: "Markdown" }));
-        req.end();
+        await axios.post(url, { chat_id: ADMIN_CHAT_ID, text: message, parse_mode: "Markdown" });
     } catch (err) { 
         console.error("Alert Error:", err.message); 
     }
@@ -62,21 +59,21 @@ function formatCaption(folderName) {
 // --- Downloader Engine ---
 async function downloadVideo(url, destPath) {
     console.log(`[INFO] Downloading video from Zoom Cloud...`);
-    sendAlert(`📥 **Downloading Zoom Cloud File...**\n\n📌 **Topic:** \`${FOLDER_NAME}\``);
+    await sendAlert(`📥 **Downloading Zoom Cloud File...**\n\n📌 **Topic:** \`${FOLDER_NAME}\``);
     
     const writer = fs.createWriteStream(destPath);
     const response = await axios({ url, method: 'GET', responseType: 'stream' });
     response.data.pipe(writer);
     
     return new Promise((resolve, reject) => {
-        writer.on('finish', () => {
+        writer.on('finish', async () => {
             const stats = fs.statSync(destPath);
             const sizeMB = (stats.size / (1024 * 1024)).toFixed(2);
-            sendAlert(`✅ **Download Complete** (${sizeMB} MB)`);
+            await sendAlert(`✅ **Download Complete** (${sizeMB} MB)`);
             resolve();
         });
-        writer.on('error', (err) => {
-            sendAlert(`🚨 **Cloud Download Failed!**\n\nError: \`${err.message}\``);
+        writer.on('error', async (err) => {
+            await sendAlert(`🚨 **Cloud Download Failed!**\n\nError: \`${err.message}\``);
             reject(err);
         });
     });
@@ -84,18 +81,18 @@ async function downloadVideo(url, destPath) {
 
 // --- Main Cloud Execution Pipeline ---
 async function runCloudPipeline() {
-    sendAlert(`🚀 **Cloud Pipeline Initiated**\n\n📁 **Topic:** \`${FOLDER_NAME}\``);
+    await sendAlert(`🚀 **Cloud Pipeline Initiated**\n\n📁 **Topic:** \`${FOLDER_NAME}\``);
     const lowerFolder = FOLDER_NAME.toLowerCase();
     
     // 1. Check for Exclusions
     if (EXCLUDED_MEETINGS.some(excluded => lowerFolder.includes(excluded))) {
-        sendAlert(`⏭️ **Skipped Meeting (Exclusion Match):**\n\`${FOLDER_NAME}\``);
+        await sendAlert(`⏭️ **Skipped Meeting (Exclusion Match):**\n\`${FOLDER_NAME}\``);
         console.log(`[INFO] Skipped excluded meeting: ${FOLDER_NAME}`);
         process.exit(0);
     }
 
     const route = resolveRoute(FOLDER_NAME);
-    sendAlert(`🗺️ **Routing Resolved:**\n🎯 **Destination:** \`${route.destination}\``);
+    await sendAlert(`🗺️ **Routing Resolved:**\n🎯 **Destination:** \`${route.destination}\``);
 
     const videoPath = "class_recording.mp4";
     const fixedVideoPath = "fixed_class_recording.mp4";
@@ -108,19 +105,20 @@ async function runCloudPipeline() {
         
         // 3. Apply FFmpeg faststart fix
         try {
-            sendAlert(`⚙️ **Starting FFmpeg Optimization...**\nFixing moov atom for streaming.`);
+            await sendAlert(`⚙️ **Starting FFmpeg Optimization...**\nFixing moov atom for streaming.`);
             console.log("[INFO] Running FFmpeg to fix moov atom...");
+            // FIX: Space added before ${fixedVideoPath}
             execSync(`ffmpeg -i ${videoPath} -c copy -movflags +faststart ${fixedVideoPath}`);
-            sendAlert(`✅ **FFmpeg Optimization Complete**`);
+            await sendAlert(`✅ **FFmpeg Optimization Complete**`);
             console.log("[INFO] FFmpeg optimization complete.");
         } catch (err) {
-            sendAlert(`⚠️ **FFmpeg Optimization Failed**\nFalling back to raw unoptimized video.\n\nError: \`${err.message}\``);
+            await sendAlert(`⚠️ **FFmpeg Optimization Failed**\nFalling back to raw unoptimized video.\n\nError: \`${err.message}\``);
             console.error("[ERROR] FFmpeg failed:", err.message);
             fs.renameSync(videoPath, fixedVideoPath); 
         }
         
         // 4. Initialize Telegram
-        sendAlert(`🔌 **Connecting to Telegram Servers...**`);
+        await sendAlert(`🔌 **Connecting to Telegram Servers...**`);
         client = new TelegramClient(new StringSession(STRING_SESSION), parseInt(API_ID), API_HASH, { 
             connectionRetries: 5,
             requestRetries: 5,
@@ -140,9 +138,9 @@ async function runCloudPipeline() {
             uploadAttempts++;
             try {
                 if (uploadAttempts === 1) {
-                    sendAlert(`📤 **Telegram Upload Starting...**\n\n🎯 **Target:** \`${route.destination}\`\n📝 **Caption:** ${caption}`);
+                    await sendAlert(`📤 **Telegram Upload Starting...**\n\n🎯 **Target:** \`${route.destination}\`\n📝 **Caption:** ${caption}`);
                 } else {
-                    sendAlert(`🔄 **Retrying Upload (Attempt ${uploadAttempts}/3)...**\n\n📌 **Topic:** \`${FOLDER_NAME}\``);
+                    await sendAlert(`🔄 **Retrying Upload (Attempt ${uploadAttempts}/3)...**\n\n📌 **Topic:** \`${FOLDER_NAME}\``);
                 }
 
                 let lastLogged = 0;
@@ -150,21 +148,20 @@ async function runCloudPipeline() {
                 await client.sendFile(route.destination, {
                     file: fixedVideoPath,
                     caption: caption,
-                    workers: 10, // Increased to 10 for faster uploads based on your previous bottleneck
+                    workers: 10, 
                     supportsStreaming: true,
                     attributes: [new Api.DocumentAttributeVideo({ w: 1280, h: 720, duration: 0, supportsStreaming: true })],
-                    progressCallback: (progress) => {
+                    progressCallback: async (progress) => {
                         const percent = Math.floor(progress * 100);
-                        // Log locally and send a Telegram alert every 25% to prevent rate-limiting
                         if (percent >= lastLogged + 25) {
                             console.log(`[INFO] Cloud Upload Progress: ${percent}%`);
-                            sendAlert(`⏳ **Upload Progress:** ${percent}%`);
+                            await sendAlert(`⏳ **Upload Progress:** ${percent}%`);
                             lastLogged = percent;
                         }
                     }
                 });
                 
-                sendAlert(`✅ **Cloud Upload Successful!**\n\n📁 **Folder:** \`${FOLDER_NAME}\`\n🎯 **Sent To:** \`${route.destination}\``);
+                await sendAlert(`✅ **Cloud Upload Successful!**\n\n📁 **Folder:** \`${FOLDER_NAME}\`\n🎯 **Sent To:** \`${route.destination}\``);
                 uploadSuccess = true;
                 
                 // 6. Clean Exit
@@ -174,17 +171,17 @@ async function runCloudPipeline() {
             } catch (err) {
                 console.error(`[ERROR] Upload attempt ${uploadAttempts} failed:${err.message}`);
                 if (uploadAttempts >= 3) {
-                    sendAlert(`❌ **Upload Failed After 3 Attempts!**\n\n📁 **Topic:** \`${FOLDER_NAME}\`\n🚨 **Error:** \`${err.message}\``);
+                    await sendAlert(`❌ **Upload Failed After 3 Attempts!**\n\n📁 **Topic:** \`${FOLDER_NAME}\`\n🚨 **Error:** \`${err.message}\``);
                     if (client) await client.disconnect();
                     process.exit(1);
                 } else {
-                    sendAlert(`⚠️ **Upload Attempt ${uploadAttempts} Interrupted**\n\nWaiting 10 seconds before retrying...`);
+                    await sendAlert(`⚠️ **Upload Attempt ${uploadAttempts} Interrupted**\n\nWaiting 10 seconds before retrying...`);
                     await new Promise(r => setTimeout(r, 10000));
                 }
             }
         }
     } catch (err) {
-        sendAlert(`❌ **Pipeline Fatal Error!**\n\n🚨 **Error:** \`${err.message}\``);
+        await sendAlert(`❌ **Pipeline Fatal Error!**\n\n🚨 **Error:** \`${err.message}\``);
         if (client) await client.disconnect();
         process.exit(1);
     }
