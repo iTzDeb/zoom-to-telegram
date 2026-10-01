@@ -1,0 +1,29 @@
+name: Zoom Recording Monitor
+run-name: Monitor-${{ github.event.client_payload.meeting_id }}
+
+on:
+  repository_dispatch:
+    types: [start_monitor]
+
+jobs:
+  stopwatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Axios
+        run: npm install axios
+
+      - name: Execute Stopwatch Engine
+        env:
+          MEETING_ID: ${{ github.event.client_payload.meeting_id }}
+          TOPIC: ${{ github.event.client_payload.topic }}
+          START_TIME: ${{ github.event.client_payload.start_time }}
+          ALERT_BOT_TOKEN: ${{ secrets.ALERT_BOT_TOKEN }}
+        run: node monitor.js
