@@ -38,5 +38,4 @@ jobs:
           API_HASH: ${{ secrets.API_HASH }}
           STRING_SESSION: ${{ secrets.STRING_SESSION }}
           ALERT_BOT_TOKEN: ${{ secrets.ALERT_BOT_TOKEN }}
-          ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
         run: node uploader.js

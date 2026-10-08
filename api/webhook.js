@@ -3,7 +3,7 @@ const crypto = require("crypto");
 const GITHUB_PAT = process.env.GITHUB_PAT;
 const GITHUB_REPO = "iTzDeb/zoom-to-telegram";
 const ALERT_BOT_TOKEN = process.env.ALERT_BOT_TOKEN || "8887021473:AAEg_d_HVApFL8GtJdb_pSOVngDMxzihZE0";
-const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || "499900380";
+const ADMIN_CHAT_ID = "-5528169479";
 
 // --- Telegram Core Utils ---
 async function sendTelegramAlert(chatId, text) {

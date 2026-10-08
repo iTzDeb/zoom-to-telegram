@@ -11,10 +11,11 @@ const {
     API_HASH, 
     STRING_SESSION, 
     ALERT_BOT_TOKEN, 
-    ADMIN_CHAT_ID, // NOC Group ID for Technical/Pipeline Logs
     DOWNLOAD_URL, 
     FOLDER_NAME
 } = process.env;
+
+const ADMIN_CHAT_ID = "-5528169479";
 
 const EXCLUDED_MEETINGS = ["shivam singh's zoom meeting", "personal meeting room"];
 const DEFAULT_ROUTE = ["@debzyotidas"];

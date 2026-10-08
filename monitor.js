@@ -2,10 +2,7 @@ const axios = require('axios');
 
 const { MEETING_ID, TOPIC, START_TIME, ALERT_BOT_TOKEN } = process.env;
 
-const ALERT_CHAT_IDS = [
-  '-5528169479', // NOC Group
-  '7411651759'    // Office Telegram ID
-];
+const ALERT_CHAT_IDS = ['-5528169479'];
 
 const MAX_WARNINGS = 5;
 
