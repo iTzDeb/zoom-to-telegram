@@ -40,16 +40,6 @@ function loadRoutes() {
     };
 }
 
-function saveRoutes(routes) {
-    try {
-        fs.writeFileSync(ROUTES_FILE, JSON.stringify(routes, null, 2), "utf8");
-        return true;
-    } catch (err) {
-        console.error("[ERROR] Failed to write routes.json:", err.message);
-        return false;
-    }
-}
-
 function resolveDestinations(folderName) {
     const lower = folderName.toLowerCase();
     const routes = loadRoutes();
