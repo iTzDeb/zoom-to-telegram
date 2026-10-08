@@ -13,8 +13,7 @@ const {
     ALERT_BOT_TOKEN, 
     ADMIN_CHAT_ID, // NOC Group ID for Technical/Pipeline Logs
     DOWNLOAD_URL, 
-    FOLDER_NAME,
-    SUPER_ADMIN_ID // Personal Telegram User ID for Management Commands
+    FOLDER_NAME
 } = process.env;
 
 const EXCLUDED_MEETINGS = ["shivam singh's zoom meeting", "personal meeting room"];
@@ -96,68 +95,6 @@ async function updateAlert(messageId, message) {
     }
 }
 
-// Admin Telegram Command Handler
-async function handleAdminCommands() {
-    const url = `https://api.telegram.org/bot${ALERT_BOT_TOKEN}/getUpdates`;
-    try {
-        const res = await axios.get(url);
-        const updates = res.data?.result || [];
-
-        for (const update of updates) {
-            const msg = update.message;
-            if (!msg || !msg.text) continue;
-
-            const senderId = String(msg.from?.id);
-            if (SUPER_ADMIN_ID && senderId !== String(SUPER_ADMIN_ID)) continue;
-
-            const text = msg.text.trim();
-            const parts = text.split(/\s+/);
-            const command = parts[0].toLowerCase();
-
-            let routes = loadRoutes();
-
-            if (command === "/listroutes") {
-                let responseText = "📋 **Configured Target Destinations:**\n\n";
-                for (const [key, targets] of Object.entries(routes)) {
-                    const list = Array.isArray(targets) ? targets.join(", ") : targets;
-                    responseText += `🔹 **${key.toUpperCase()}**: \`${list}\`\n`;
-                }
-                await sendAlert(responseText);
-            }
-            else if (command === "/addroute" && parts.length >= 3) {
-                const key = parts[1].toLowerCase();
-                const chatId = parts[2];
-
-                if (!routes[key]) routes[key] = [];
-                if (!Array.isArray(routes[key])) routes[key] = [routes[key]];
-
-                if (!routes[key].includes(chatId)) {
-                    routes[key].push(chatId);
-                    saveRoutes(routes);
-                    await sendAlert(`✅ **Route Added Successfully!**\n\n🔑 **Tag:** \`${key}\`\n🎯 **Chat ID:** \`${chatId}\``);
-                } else {
-                    await sendAlert(`⚠️ **Route Exists:** Chat ID \`${chatId}\` is already registered under tag \`${key}\`.`);
-                }
-            }
-            else if (command === "/delroute" && parts.length >= 3) {
-                const key = parts[1].toLowerCase();
-                const chatId = parts[2];
-
-                if (routes[key]) {
-                    routes[key] = routes[key].filter(id => id !== chatId);
-                    if (routes[key].length === 0) delete routes[key];
-                    saveRoutes(routes);
-                    await sendAlert(`🗑️ **Route Removed!**\n\n🔑 **Tag:** \`${key}\`\n🎯 **Removed ID:** \`${chatId}\``);
-                } else {
-                    await sendAlert(`❌ **Route Not Found:** Tag \`${key}\` does not exist.`);
-                }
-            }
-        }
-    } catch (err) {
-        console.error("[ADMIN ENGINE ERROR]", err.message);
-    }
-}
-
 // =========================================================================
 // 3. MEDIA FORMATTING & DOWNLOAD ENGINE
 // =========================================================================
@@ -209,8 +146,6 @@ async function downloadVideo(url, destPath) {
 // 4. MAIN CLOUD PIPELINE EXECUTION
 // =========================================================================
 async function runCloudPipeline() {
-    await handleAdminCommands();
-
     await sendAlert(`🚀 **Cloud Pipeline Initiated**\n\n📁 **Topic:** \`${FOLDER_NAME}\``);
     const lowerFolder = FOLDER_NAME.toLowerCase();
     
@@ -248,6 +183,8 @@ async function runCloudPipeline() {
         
         await client.connect();
         await client.getDialogs({}); 
+
+        const failedDestinations = [];
 
         for (const targetGroup of destinations) {
             let uploadAttempts = 0;
@@ -295,12 +232,17 @@ async function runCloudPipeline() {
                 } catch (err) {
                     console.error(`[ERROR] Group ${targetGroup} upload attempt ${uploadAttempts} failed:${err.message}`);
                     if (uploadAttempts >= 3) {
+                        failedDestinations.push(targetGroup);
                         await sendAlert(`❌ **Failed Delivery to Group:** \`${targetGroup}\`\nError: \`${err.message}\``);
                     } else {
                         await new Promise(r => setTimeout(r, 5000));
                     }
                 }
             }
+        }
+
+        if (failedDestinations.length > 0) {
+            throw new Error(`Failed delivery to: ${failedDestinations.join(", ")}`);
         }
 
         await client.disconnect();
