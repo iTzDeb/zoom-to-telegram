@@ -34,7 +34,7 @@ function loadRoutes() {
         console.error("[ERROR] Failed to load routes.json:", err.message);
     }
     return {
-        "clat": ["-1005035863697"],
+        "clat": ["-1003982101042"],
         "clat28": ["-5294840552"],
         "cuet": ["-1003536485528"],
         "aibe": ["-1004024072220"]
@@ -232,7 +232,7 @@ async function runCloudPipeline() {
         
         try {
             await sendAlert(`⚙️ **Starting FFmpeg Optimization...**\nFixing moov atom for streaming.`);
-            execSync(`ffmpeg -i ${videoPath} -c copy -movflags +faststart${fixedVideoPath}`);
+            execSync(`ffmpeg -i ${videoPath} -c copy -movflags +faststart ${fixedVideoPath}`);
             await sendAlert(`✅ **FFmpeg Optimization Complete**`);
         } catch (err) {
             await sendAlert(`⚠️ **FFmpeg Optimization Failed**\nFalling back to raw unoptimized video.`);
